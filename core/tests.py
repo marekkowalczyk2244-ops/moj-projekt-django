@@ -1,11 +1,11 @@
 from django.test import TestCase
 
+from core.tasks import add
+
 
 class SanityTests(TestCase):
     def test_true_is_true(self):
         self.assertTrue(True)
-
-from core.tasks import add
 
 
 class CeleryTaskTests(TestCase):
