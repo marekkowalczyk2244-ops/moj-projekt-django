@@ -79,7 +79,7 @@ jobs:
       - name: isort --check
         run: isort --check .
 
-security:
+  security:
     runs-on: ubuntu-latest
     steps:
       - name: Pobranie kodu repozytorium
