@@ -1,0 +1,87 @@
+name: Deploy
+
+on:
+  push:
+    branches: ["main"]
+  workflow_dispatch:
+    inputs:
+      action:
+        description: "Akcja do wykonania"
+        required: true
+        default: "deploy"
+        type: choice
+        options:
+          - deploy
+          - rollback
+
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' || github.event.inputs.action == 'deploy'
+    permissions:
+      contents: read
+      packages: write
+    env:
+      REGISTRY: ghcr.io
+    steps:
+      - name: Pobranie kodu repozytorium
+        uses: actions/checkout@v4
+
+      - name: Ustawienie nazwy obrazu małymi literami
+        run: echo "IMAGE_NAME=${GITHUB_REPOSITORY,,}" >> $GITHUB_ENV
+
+      - name: Logowanie do GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Zachowanie poprzedniej stabilnej wersji (punkt rollbacku)
+        run: |
+          docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:stable || echo "Brak wczesniejszej wersji stable - pierwszy deploy"
+          if docker image inspect ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:stable > /dev/null 2>&1; then
+            docker tag ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:stable ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:previous
+            docker push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:previous
+          fi
+
+      - name: Budowanie i pushowanie obrazu Docker
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:stable
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
+
+      - name: Deploy na serwer
+        run: |
+          echo "Obraz ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }} zostal zbudowany i wypchniety."
+          echo "TODO: docelowy krok SSH/deploy na serwer - uzupelnic po skonfigurowaniu serwera."
+
+      - name: Podsumowanie wdrożenia
+        run: |
+          echo "### Deploy zakonczony" >> $GITHUB_STEP_SUMMARY
+          echo "- Obraz: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Commit: ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Branch: ${{ github.ref_name }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Punkt rollbacku zapisany jako tag :previous" >> $GITHUB_STEP_SUMMARY
+
+  rollback:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.action == 'rollback'
+    permissions:
+      contents: read
+      packages: write
+    env:
+      REGISTRY: ghcr.io
+    steps:
+      - name: Pobranie kodu repozytorium
+        uses: actions/checkout@v4
+
+      - name: Ustawienie nazwy obrazu małymi literami
